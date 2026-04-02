@@ -17,23 +17,20 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        working-directory: TermLink
-        run: pip install PyQt6 py2app
+        run: cd "$GITHUB_WORKSPACE/TermLink" && pip install PyQt6 py2app
 
       - name: Build .app
-        working-directory: TermLink
-        run: python setup.py py2app
+        run: cd "$GITHUB_WORKSPACE/TermLink" && python setup.py py2app
 
       - name: Fix libffi
-        working-directory: TermLink
         run: |
-          FRAMEWORKS="dist/TermLink.app/Contents/Frameworks"
+          FRAMEWORKS="$GITHUB_WORKSPACE/TermLink/dist/TermLink.app/Contents/Frameworks"
           LIBFFI=$(find /usr/local /opt/homebrew -name "libffi.8.dylib" 2>/dev/null | head -1)
-          [ -n "$LIBFFI" ] && cp "$LIBFFI" "$FRAMEWORKS/" && echo "Copied $LIBFFI" || echo "libffi not found"
+          [ -n "$LIBFFI" ] && cp "$LIBFFI" "$FRAMEWORKS/" && echo "Copied $LIBFFI" || echo "libffi not found, skipping"
 
       - name: Package .app
-        working-directory: TermLink/dist
         run: |
+          cd "$GITHUB_WORKSPACE/TermLink/dist"
           ditto -c -k --sequesterRsrc --keepParent TermLink.app "TermLink-${GITHUB_REF_NAME}-macOS.zip"
           ls -lh "TermLink-${GITHUB_REF_NAME}-macOS.zip"
 
@@ -53,21 +50,20 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        working-directory: TermLink
         run: pip install PyQt6 pyinstaller
+        shell: pwsh
 
       - name: Write version.py
-        working-directory: TermLink
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart('v')
-          Set-Content -Path "src/version.py" -Value "__version__ = `"$tag`""
+          Set-Content -Path "$env:GITHUB_WORKSPACE\TermLink\src\version.py" -Value "__version__ = `"$tag`""
           Write-Host "Version: $tag"
 
       - name: Build .exe
-        working-directory: TermLink
         shell: pwsh
         run: |
+          Set-Location "$env:GITHUB_WORKSPACE\TermLink"
           pyinstaller --noconfirm --onefile --windowed `
             --name TermLink `
             --add-data "src;src" `
@@ -76,12 +72,12 @@ jobs:
             main.py
 
       - name: Package .exe
-        working-directory: TermLink/dist
         shell: pwsh
         run: |
           $v = "${{ github.ref_name }}"
-          Compress-Archive -Path "TermLink.exe" -DestinationPath "TermLink-${v}-Windows.zip"
-          Get-Item "TermLink-${v}-Windows.zip"
+          $dist = "$env:GITHUB_WORKSPACE\TermLink\dist"
+          Compress-Archive -Path "$dist\TermLink.exe" -DestinationPath "$dist\TermLink-${v}-Windows.zip"
+          Get-Item "$dist\TermLink-${v}-Windows.zip"
 
       - uses: actions/upload-artifact@v4
         with:
