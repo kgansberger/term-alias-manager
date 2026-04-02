@@ -9,4 +9,5 @@ src/version.py
 
 # internal planning & dev docs
 *.md
+!README.md
 *.backup
