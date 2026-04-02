@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 from zshrc_parser import AliasEntry, read_aliases, write_aliases
+from version import __version__ as APP_VERSION
 
 
 # ── Design tokens ──────────────────────────────────────────────────────────
@@ -427,7 +428,7 @@ class SettingsWidget(QWidget):
         info_lay = QVBoxLayout()
         info_lay.setSpacing(4)
         for k, v in [
-            ("Version", "1.0.0"),
+            ("Version", APP_VERSION),
             ("Entwickler", "klausinger"),
             ("Python", sys.version.split()[0]),
         ]:
