@@ -5,10 +5,6 @@ on:
     tags:
       - 'v*'
 
-defaults:
-  run:
-    working-directory: TermLink
-
 jobs:
   # ── macOS .app ─────────────────────────────────────────────────────────
   build-macos:
@@ -16,40 +12,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
       - name: Install dependencies
+        working-directory: TermLink
         run: pip install PyQt6 py2app
 
       - name: Build .app
+        working-directory: TermLink
         run: python setup.py py2app
 
       - name: Fix libffi
+        working-directory: TermLink
         run: |
           FRAMEWORKS="dist/TermLink.app/Contents/Frameworks"
           LIBFFI=$(find /usr/local /opt/homebrew -name "libffi.8.dylib" 2>/dev/null | head -1)
-          if [ -n "$LIBFFI" ]; then
-            cp "$LIBFFI" "$FRAMEWORKS/"
-            echo "Copied $LIBFFI"
-          else
-            echo "libffi not found, skipping"
-          fi
+          [ -n "$LIBFFI" ] && cp "$LIBFFI" "$FRAMEWORKS/" && echo "Copied $LIBFFI" || echo "libffi not found"
 
-      - name: Package .app as zip
+      - name: Package .app
+        working-directory: TermLink/dist
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          cd dist
-          ditto -c -k --sequesterRsrc --keepParent TermLink.app "TermLink-${VERSION}-macOS.zip"
-          ls -lh "TermLink-${VERSION}-macOS.zip"
+          ditto -c -k --sequesterRsrc --keepParent TermLink.app "TermLink-${GITHUB_REF_NAME}-macOS.zip"
+          ls -lh "TermLink-${GITHUB_REF_NAME}-macOS.zip"
 
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: TermLink/dist/TermLink-*.zip
+          path: TermLink/dist/TermLink-*-macOS.zip
 
   # ── Windows .exe ────────────────────────────────────────────────────────
   build-windows:
@@ -57,22 +48,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
       - name: Install dependencies
+        working-directory: TermLink
         run: pip install PyQt6 pyinstaller
 
       - name: Write version.py
+        working-directory: TermLink
+        shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart('v')
           Set-Content -Path "src/version.py" -Value "__version__ = `"$tag`""
           Write-Host "Version: $tag"
-        shell: pwsh
 
       - name: Build .exe
+        working-directory: TermLink
+        shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --name TermLink `
@@ -80,18 +74,16 @@ jobs:
             --hidden-import zshrc_parser `
             --hidden-import version `
             main.py
-        shell: pwsh
 
-      - name: Package .exe as zip
+      - name: Package .exe
+        working-directory: TermLink/dist
+        shell: pwsh
         run: |
-          $VERSION = "${{ github.ref_name }}"
-          Compress-Archive -Path "dist/TermLink.exe" `
-            -DestinationPath "dist/TermLink-${VERSION}-Windows.zip"
-          Get-Item "dist/TermLink-${VERSION}-Windows.zip"
-        shell: pwsh
+          $v = "${{ github.ref_name }}"
+          Compress-Archive -Path "TermLink.exe" -DestinationPath "TermLink-${v}-Windows.zip"
+          Get-Item "TermLink-${v}-Windows.zip"
 
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: TermLink/dist/TermLink-*-Windows.zip
@@ -105,13 +97,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/macos-build/*.zip
@@ -125,5 +115,5 @@ jobs:
             | **macOS** | `TermLink-${{ github.ref_name }}-macOS.zip` → unzip, drag to /Applications |
             | **Windows** | `TermLink-${{ github.ref_name }}-Windows.zip` → unzip, run TermLink.exe |
 
-            > **macOS first launch:** right-click → Open if Gatekeeper blocks the app.
+            > **macOS:** right-click → Open on first launch if Gatekeeper blocks the app.
             > **Windows:** requires Git Bash or WSL for shell alias functionality.
