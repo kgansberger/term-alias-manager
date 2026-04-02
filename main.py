@@ -349,7 +349,7 @@ class SettingsWidget(QWidget):
         col_ed.setSpacing(2)
         t_ed = QLabel("Editor für .zshrc")
         t_ed.setStyleSheet("font-size:13px; color:#1C1C1E;")
-        sub_ed = QLabel("Wird beim Klick auf „Öffnen" verwendet")
+        sub_ed = QLabel('Wird beim Klick auf "Öffnen" verwendet')
         sub_ed.setStyleSheet("font-size:11px; color:#8E8E93;")
         col_ed.addWidget(t_ed)
         col_ed.addWidget(sub_ed)
