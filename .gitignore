@@ -11,3 +11,4 @@ src/version.py
 *.md
 !README.md
 *.backup
+!.github/

@@ -1,12 +1,18 @@
 """
-main.py — TermLink: iTerm2 Project Alias Manager
-PyQt6 macOS GUI
+main.py — TermLink: Terminal Project Alias Manager
+PyQt6 GUI — macOS & Windows
 """
 
-import plistlib
+import platform
 import subprocess
 import sys
 from pathlib import Path
+
+IS_MAC = platform.system() == "Darwin"
+IS_WIN = platform.system() == "Windows"
+
+if IS_MAC:
+    import plistlib
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import (
@@ -37,8 +43,11 @@ FG_CODE    = "#CDD6F4"
 BORDER     = "#D1D1D6"
 
 PLIST_ID   = "dev.termlink.app"
-PLIST_PATH = Path.home() / f"Library/LaunchAgents/{PLIST_ID}.plist"
-PYTHON_BIN = subprocess.run(["which", "python3"], capture_output=True, text=True).stdout.strip()
+PLIST_PATH = Path.home() / f"Library/LaunchAgents/{PLIST_ID}.plist" if IS_MAC else Path()
+PYTHON_BIN = subprocess.run(
+    ["where", "python"] if IS_WIN else ["which", "python3"],
+    capture_output=True, text=True
+).stdout.strip().splitlines()[0]
 MAIN_PY    = str(Path(__file__).resolve())
 
 
@@ -76,24 +85,52 @@ def _make_app_icon() -> QIcon:
 
 # ── Autostart helpers ────────────────────────────────────────────────────────
 def _autostart_enabled() -> bool:
-    return PLIST_PATH.exists()
+    if IS_MAC:
+        return PLIST_PATH.exists()
+    if IS_WIN:
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+            winreg.QueryValueEx(key, "TermLink")
+            winreg.CloseKey(key)
+            return True
+        except Exception:
+            return False
+    return False
 
 def _set_autostart(enable: bool):
-    if enable:
-        plist = {
-            "Label":             PLIST_ID,
-            "ProgramArguments":  [PYTHON_BIN, MAIN_PY],
-            "RunAtLoad":         True,
-            "KeepAlive":         False,
-            "StandardOutPath":   str(Path.home() / "Library/Logs/TermLink.log"),
-            "StandardErrorPath": str(Path.home() / "Library/Logs/TermLink.log"),
-        }
-        PLIST_PATH.write_bytes(plistlib.dumps(plist))
-        subprocess.run(["launchctl", "load", str(PLIST_PATH)], capture_output=True)
-    else:
-        if PLIST_PATH.exists():
-            subprocess.run(["launchctl", "unload", str(PLIST_PATH)], capture_output=True)
-            PLIST_PATH.unlink()
+    if IS_MAC:
+        if enable:
+            plist = {
+                "Label":             PLIST_ID,
+                "ProgramArguments":  [PYTHON_BIN, MAIN_PY],
+                "RunAtLoad":         True,
+                "KeepAlive":         False,
+                "StandardOutPath":   str(Path.home() / "Library/Logs/TermLink.log"),
+                "StandardErrorPath": str(Path.home() / "Library/Logs/TermLink.log"),
+            }
+            PLIST_PATH.write_bytes(plistlib.dumps(plist))
+            subprocess.run(["launchctl", "load", str(PLIST_PATH)], capture_output=True)
+        else:
+            if PLIST_PATH.exists():
+                subprocess.run(["launchctl", "unload", str(PLIST_PATH)], capture_output=True)
+                PLIST_PATH.unlink()
+    elif IS_WIN:
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+            if enable:
+                winreg.SetValueEx(key, "TermLink", 0, winreg.REG_SZ, f'"{MAIN_PY}"')
+            else:
+                try:
+                    winreg.DeleteValue(key, "TermLink")
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(key)
+        except Exception as e:
+            print(f"[autostart error] {e}")
 
 
 # ── Widget helpers ────────────────────────────────────────────────────────
@@ -314,17 +351,17 @@ class SettingsWidget(QWidget):
         lay.setContentsMargins(32, 28, 32, 28)
         lay.setSpacing(0)
 
-        # ── Section: Allgemein ──────────────────────────────────────────
-        lay.addWidget(_section_label("⚙️  Allgemein"))
+        # ── Section: General ───────────────────────────────────────────
+        lay.addWidget(_section_label("⚙️  General"))
         lay.addSpacing(10)
 
         # Autostart row
         row_auto = QHBoxLayout()
         col = QVBoxLayout()
         col.setSpacing(2)
-        t = QLabel("Beim Systemstart automatisch öffnen")
+        t = QLabel("Launch at login")
         t.setStyleSheet("font-size:13px; color:#1C1C1E;")
-        sub = QLabel("TermLink startet beim Login via LaunchAgent (~/.launchd)")
+        sub = QLabel("TermLink starts at login via LaunchAgent (macOS) / Registry (Windows)")
         sub.setStyleSheet("font-size:11px; color:#8E8E93;")
         col.addWidget(t)
         col.addWidget(sub)
@@ -348,9 +385,10 @@ class SettingsWidget(QWidget):
         row_ed = QHBoxLayout()
         col_ed = QVBoxLayout()
         col_ed.setSpacing(2)
-        t_ed = QLabel("Editor für .zshrc")
+        shell_file = "~/.zshrc" if IS_MAC else "%USERPROFILE%\\.bashrc (WSL/Git Bash)"
+        t_ed = QLabel(f"Editor for {shell_file}")
         t_ed.setStyleSheet("font-size:13px; color:#1C1C1E;")
-        sub_ed = QLabel('Wird beim Klick auf "Öffnen" verwendet')
+        sub_ed = QLabel('Used when clicking "Open"')
         sub_ed.setStyleSheet("font-size:11px; color:#8E8E93;")
         col_ed.addWidget(t_ed)
         col_ed.addWidget(sub_ed)
@@ -358,7 +396,10 @@ class SettingsWidget(QWidget):
         row_ed.addStretch()
         from PyQt6.QtWidgets import QComboBox
         self.editor_combo = QComboBox()
-        self.editor_combo.addItems(["TextEdit", "VS Code", "Cursor", "Zed", "Sublime Text", "nano (Terminal)"])
+        if IS_WIN:
+            self.editor_combo.addItems(["Notepad", "VS Code", "Cursor", "Notepad++", "Sublime Text"])
+        else:
+            self.editor_combo.addItems(["TextEdit", "VS Code", "Cursor", "Zed", "Sublime Text", "nano (Terminal)"])
         self.editor_combo.setFixedWidth(150)
         self.editor_combo.setStyleSheet(f"""
             QComboBox {{
@@ -373,19 +414,20 @@ class SettingsWidget(QWidget):
 
         lay.addSpacing(14)
 
-        # zshrc path row
+        # Shell config path row
         row_zsh = QHBoxLayout()
         col2 = QVBoxLayout()
         col2.setSpacing(2)
-        t2 = QLabel("Pfad zur ~/.zshrc")
+        from zshrc_parser import SHELL_CONFIG
+        t2 = QLabel("Shell config file")
         t2.setStyleSheet("font-size:13px; color:#1C1C1E;")
-        self.zshrc_path_lbl = QLabel(str(Path.home() / ".zshrc"))
+        self.zshrc_path_lbl = QLabel(str(SHELL_CONFIG))
         self.zshrc_path_lbl.setStyleSheet("font-size:11px; color:#8E8E93; font-family:Menlo,monospace;")
         col2.addWidget(t2)
         col2.addWidget(self.zshrc_path_lbl)
         row_zsh.addLayout(col2)
         row_zsh.addStretch()
-        open_zsh_btn = _ghost_btn("Öffnen")
+        open_zsh_btn = _ghost_btn("Open")
         open_zsh_btn.setFixedWidth(80)
         open_zsh_btn.clicked.connect(self._open_zshrc)
         row_zsh.addWidget(open_zsh_btn)
@@ -402,16 +444,16 @@ class SettingsWidget(QWidget):
         row_bak = QHBoxLayout()
         col3 = QVBoxLayout()
         col3.setSpacing(2)
-        t3 = QLabel("Backup-Datei anzeigen")
+        t3 = QLabel("Show backup file")
         t3.setStyleSheet("font-size:13px; color:#1C1C1E;")
-        bak_path = str(Path.home() / ".zshrc.backup")
-        sub3 = QLabel(f"Wird vor jeder Änderung erstellt: {bak_path}")
+        from zshrc_parser import BACKUP
+        sub3 = QLabel(f"Created before every change: {BACKUP}")
         sub3.setStyleSheet("font-size:11px; color:#8E8E93; font-family:Menlo,monospace;")
         col3.addWidget(t3)
         col3.addWidget(sub3)
         row_bak.addLayout(col3)
         row_bak.addStretch()
-        open_bak_btn = _ghost_btn("Im Finder")
+        open_bak_btn = _ghost_btn("Show")
         open_bak_btn.setFixedWidth(90)
         open_bak_btn.clicked.connect(self._show_backup)
         row_bak.addWidget(open_bak_btn)
@@ -429,7 +471,8 @@ class SettingsWidget(QWidget):
         info_lay.setSpacing(4)
         for k, v in [
             ("Version", APP_VERSION),
-            ("Entwickler", "klausinger"),
+            ("Developer", "klausinger"),
+            ("Platform", platform.system()),
             ("Python", sys.version.split()[0]),
         ]:
             row = QHBoxLayout()
@@ -452,37 +495,55 @@ class SettingsWidget(QWidget):
         self._status.showMessage(msg)
 
     def _open_zshrc(self):
-        zshrc = str(Path.home() / ".zshrc")
+        from zshrc_parser import SHELL_CONFIG
+        path = str(SHELL_CONFIG)
         editor = self.editor_combo.currentText()
-        app_map = {
-            "VS Code":       "Visual Studio Code",
-            "Cursor":        "Cursor",
-            "Zed":           "Zed",
-            "Sublime Text":  "Sublime Text",
-            "TextEdit":      "TextEdit",
-        }
-        if editor == "nano (Terminal)":
-            osascript = f'''tell application "iTerm2"
-    activate
-    tell current window
-        create tab with default profile
-        tell current session of current tab
-            write text "nano {zshrc}"
-        end tell
-    end tell
-end tell'''
-            subprocess.run(["osascript", "-e", osascript])
-        elif editor in app_map:
-            subprocess.run(["open", "-a", app_map[editor], zshrc])
+        if IS_WIN:
+            app_map = {
+                "VS Code":     "code",
+                "Cursor":      "cursor",
+                "Notepad++":   "notepad++",
+                "Sublime Text":"subl",
+                "Notepad":     "notepad",
+            }
+            cmd = app_map.get(editor, "notepad")
+            subprocess.Popen([cmd, path])
         else:
-            subprocess.run(["open", "-t", zshrc])
+            app_map = {
+                "VS Code":      "Visual Studio Code",
+                "Cursor":       "Cursor",
+                "Zed":          "Zed",
+                "Sublime Text": "Sublime Text",
+                "TextEdit":     "TextEdit",
+            }
+            if editor == "nano (Terminal)":
+                osascript = (
+                    'tell application "iTerm2"\n'
+                    '    activate\n'
+                    '    tell current window\n'
+                    '        create tab with default profile\n'
+                    '        tell current session of current tab\n'
+                    f'            write text "nano {path}"\n'
+                    '        end tell\n'
+                    '    end tell\n'
+                    'end tell'
+                )
+                subprocess.run(["osascript", "-e", osascript])
+            elif editor in app_map:
+                subprocess.run(["open", "-a", app_map[editor], path])
+            else:
+                subprocess.run(["open", "-t", path])
 
     def _show_backup(self):
-        bak = Path.home() / ".zshrc.backup"
+        from zshrc_parser import BACKUP
+        bak = Path(BACKUP)
         if bak.exists():
-            subprocess.run(["open", "-R", str(bak)])
+            if IS_WIN:
+                subprocess.Popen(["explorer", "/select,", str(bak)])
+            else:
+                subprocess.run(["open", "-R", str(bak)])
         else:
-            QMessageBox.information(None, "Kein Backup", "Noch kein Backup vorhanden.")
+            QMessageBox.information(None, "No backup", "No backup file found yet.")
 
 
 def _toggle_switch() -> QCheckBox:
@@ -1085,12 +1146,18 @@ class TermLinkWindow(QWidget):
     def _on_open_finder(self):
         path = self._resolved_path()
         if path:
-            subprocess.run(["open", path])
+            if IS_WIN:
+                subprocess.Popen(["explorer", path])
+            else:
+                subprocess.run(["open", path])
 
     def _on_open_iterm(self):
         path = self._resolved_path()
         if path:
-            subprocess.run(["open", "-a", "iTerm", path])
+            if IS_WIN:
+                subprocess.Popen(["wt", "-d", path])  # Windows Terminal
+            else:
+                subprocess.run(["open", "-a", "iTerm", path])
 
     def _resolved_path(self) -> str:
         raw = self.path_field.text().strip()
@@ -1098,8 +1165,8 @@ class TermLinkWindow(QWidget):
             return ""
         expanded = str(Path(raw).expanduser())
         if not Path(expanded).exists():
-            QMessageBox.warning(self, "Pfad nicht gefunden",
-                f"Der Ordner existiert nicht:\n{expanded}")
+            QMessageBox.warning(self, "Path not found",
+                f"The folder does not exist:\n{expanded}")
             return ""
         return expanded
 
@@ -1109,18 +1176,14 @@ class TermLinkWindow(QWidget):
         self.open_iterm_btn.setEnabled(has)
 
     def _on_run_alias(self):
-        """Führt den aktuellen Alias direkt in einem neuen iTerm2-Tab aus."""
         idx = self._editing_index
         if idx is None:
             return
         a = self._aliases[idx]
-
-        # Befehlsteile aufbauen — Titel VOR dem Command setzen
         parts = []
         if a.path:
             parts.append(f"cd {a.path}")
         if a.title:
-            # direkt nach cd, bevor ein blockierender Prozess startet
             parts.append(f"printf '\\033]0;{a.title}\\007'")
         if a.command:
             parts.append(a.command)
@@ -1128,29 +1191,32 @@ class TermLinkWindow(QWidget):
         if not shell_cmd:
             return
 
-        # AppleScript: in iTerm2-Tab ausführen
-        # Anführungszeichen im Befehl escapen (AppleScript erwartet \" innerhalb von "...")
-        safe_cmd = shell_cmd.replace("\\", "\\\\").replace('"', '\\"')
-        apple = (
-            'tell application "iTerm2"\n'
-            '    activate\n'
-            '    tell current window\n'
-            '        create tab with default profile\n'
-            '        tell current session of current tab\n'
-            f'            write text "{safe_cmd}"\n'
-            '        end tell\n'
-            '    end tell\n'
-            'end tell'
-        )
-        result = subprocess.run(["osascript", "-e", apple],
-                                capture_output=True, text=True)
-        if result.returncode == 0:
-            self.status.showMessage(f"▶  '{a.name}' ausgeführt in neuem iTerm2-Tab")
+        if IS_WIN:
+            subprocess.Popen(["wt", "new-tab", "--", "cmd", "/k",
+                              shell_cmd.replace("&&", "&")])
+            self.status.showMessage(f"▶  '{a.name}' launched in Windows Terminal")
         else:
-            err = result.stderr.strip()
-            self.status.showMessage(f"⚠  AppleScript Fehler: {err[:80]}")
+            safe_cmd = shell_cmd.replace("\\", "\\\\").replace('"', '\\"')
+            apple = (
+                'tell application "iTerm2"\n'
+                '    activate\n'
+                '    tell current window\n'
+                '        create tab with default profile\n'
+                '        tell current session of current tab\n'
+                f'            write text "{safe_cmd}"\n'
+                '        end tell\n'
+                '    end tell\n'
+                'end tell'
+            )
+            result = subprocess.run(["osascript", "-e", apple], capture_output=True, text=True)
+            if result.returncode == 0:
+                self.status.showMessage(f"▶  '{a.name}' launched in new iTerm2 tab")
+            else:
+                self.status.showMessage(f"⚠  AppleScript error: {result.stderr.strip()[:80]}")
 
     def _source_zshrc(self):
+        if IS_WIN:
+            return  # Windows: no source needed, aliases are in .bashrc/.profile
         try:
             r = subprocess.run(["zsh", "-i", "-c", "source ~/.zshrc"],
                                capture_output=True, text=True, timeout=5)

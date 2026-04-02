@@ -1,0 +1,128 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ── macOS .app ─────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install PyQt6 py2app
+
+      - name: Build .app
+        run: |
+          cd TermLink
+          python setup.py py2app
+
+      - name: Fix libffi (py2app known issue)
+        run: |
+          FRAMEWORKS="TermLink/dist/TermLink.app/Contents/Frameworks"
+          LIBFFI=$(find /usr/local /opt/homebrew -name "libffi.8.dylib" 2>/dev/null | head -1)
+          if [ -n "$LIBFFI" ]; then
+            cp "$LIBFFI" "$FRAMEWORKS/"
+            echo "Copied $LIBFFI"
+          else
+            echo "libffi.8.dylib not found, skipping"
+          fi
+
+      - name: Package .app as zip
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          cd TermLink/dist
+          ditto -c -k --sequesterRsrc --keepParent TermLink.app "TermLink-${VERSION}-macOS.zip"
+          ls -lh "TermLink-${VERSION}-macOS.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: TermLink/dist/TermLink-*.zip
+
+  # ── Windows .exe ────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install PyQt6 pyinstaller
+
+      - name: Build .exe
+        run: |
+          cd TermLink
+          python -c "
+          import subprocess, pathlib
+          tag = subprocess.run(['git','describe','--tags','--abbrev=0'], capture_output=True, text=True).stdout.strip().lstrip('v')
+          pathlib.Path('src/version.py').write_text(f'__version__ = \"{tag}\"\n')
+          print(f'Version: {tag}')
+          "
+          pyinstaller --noconfirm --onefile --windowed `
+            --name TermLink `
+            --add-data "src;src" `
+            --hidden-import zshrc_parser `
+            --hidden-import version `
+            main.py
+
+      - name: Package .exe as zip
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}"
+          Compress-Archive -Path "TermLink/dist/TermLink.exe" `
+            -DestinationPath "TermLink/dist/TermLink-${VERSION}-Windows.zip"
+          Get-Item "TermLink/dist/TermLink-${VERSION}-Windows.zip"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: TermLink/dist/TermLink-*-Windows.zip
+
+  # ── GitHub Release ───────────────────────────────────────────────────────
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/macos-build/*.zip
+            artifacts/windows-build/*.zip
+          generate_release_notes: true
+          body: |
+            ## TermLink ${{ github.ref_name }}
+
+            | Platform | Download |
+            |----------|----------|
+            | **macOS** | `TermLink-${{ github.ref_name }}-macOS.zip` → unzip, drag to /Applications |
+            | **Windows** | `TermLink-${{ github.ref_name }}-Windows.zip` → unzip, run TermLink.exe |
+
+            > **macOS first launch:** right-click → Open if Gatekeeper blocks the app.
+            > **Windows:** requires Git Bash or WSL for shell alias functionality.

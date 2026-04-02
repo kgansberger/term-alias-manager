@@ -5,13 +5,22 @@ Each alias line is preceded by a # [project-alias] marker.
 All other lines are left untouched.
 """
 
+import platform
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-ZSHRC     = Path.home() / ".zshrc"
-BACKUP    = Path.home() / ".zshrc.backup"
+_IS_WIN = platform.system() == "Windows"
+
+# Shell config file — .zshrc on macOS, .bashrc for Git Bash/WSL on Windows
+if _IS_WIN:
+    SHELL_CONFIG = Path.home() / ".bashrc"
+else:
+    SHELL_CONFIG = Path.home() / ".zshrc"
+
+ZSHRC  = SHELL_CONFIG   # backwards compat alias
+BACKUP = Path(str(SHELL_CONFIG) + ".backup")
 BEGIN_TAG = "# BEGIN project-aliases"
 END_TAG   = "# END project-aliases"
 LINE_TAG  = "# [project-alias]"
@@ -89,14 +98,14 @@ class AliasEntry:
 # ── I/O ───────────────────────────────────────────────────────────────────────
 
 def _read_zshrc() -> list[str]:
-    if not ZSHRC.exists():
+    if not SHELL_CONFIG.exists():
         return []
-    return ZSHRC.read_text(encoding="utf-8").splitlines(keepends=True)
+    return SHELL_CONFIG.read_text(encoding="utf-8").splitlines(keepends=True)
 
 
 def _backup():
-    if ZSHRC.exists():
-        shutil.copy2(ZSHRC, BACKUP)
+    if SHELL_CONFIG.exists():
+        shutil.copy2(SHELL_CONFIG, BACKUP)
 
 
 def read_aliases() -> list[AliasEntry]:
@@ -145,4 +154,4 @@ def write_aliases(aliases: list[AliasEntry]) -> None:
             new_lines.append("\n")
         new_lines.extend(block)
 
-    ZSHRC.write_text("".join(new_lines), encoding="utf-8")
+    SHELL_CONFIG.write_text("".join(new_lines), encoding="utf-8")
