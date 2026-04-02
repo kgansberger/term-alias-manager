@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
-from zshrc_parser import AliasEntry, read_aliases, write_aliases
+from zshrc_parser import AliasEntry, read_aliases, write_aliases, SHELL_CONFIG
 from version import __version__ as APP_VERSION
 
 
@@ -258,57 +258,74 @@ HELP_HTML = """
          padding:10px 14px; font-family:Menlo,monospace; font-size:12px; }
   ul,ol{ padding-left:18px; }
   li   { margin-bottom:4px; }
+  .tip { background:#E5F0FF; border-left:3px solid #007AFF;
+         border-radius:4px; padding:8px 12px; margin:8px 0; font-size:12px; }
 </style>
 
-<h2>⌨️ TermLink — iTerm2 Project Alias Manager</h2>
-<p>TermLink legt Shell-Aliases in deiner <code>~/.zshrc</code> an, die dich mit
-einem Befehl in einen Projektordner teleportieren — inklusive optionalem
-iTerm2-Tab-Titel und startbarem Zusatz-Befehl.</p>
+<h2>⌨️ TermLink — Terminal Project Alias Manager</h2>
+<p>TermLink manages shell aliases in your <code>~/.zshrc</code> that jump you into
+any project folder in one keystroke — with an optional tab title and a startup
+command that runs automatically.</p>
 
-<h3>🚀 Was macht ein Alias?</h3>
-<pre>alias myapp='cd ~/Projects/myapp &amp;&amp; pnpm run dev &amp;&amp; sleep 0.05 &amp;&amp; echo -ne "\033]0;MyApp\007"'</pre>
+<div class="tip">
+  💡 <b>The fast lane:</b> Instead of <code>cd ~/Projects/myapp &amp;&amp; claude</code>
+  every time — just type <code>aichat</code>. One word. Done.
+</div>
+
+<h3>🚀 What does an alias do?</h3>
+<pre>alias aichat='cd ~/Projects/myapp &amp;&amp; printf "\033]0;AI Chat\007" &amp;&amp; claude'</pre>
 <ul>
-  <li>Wechselt ins Verzeichnis <code>~/Projects/myapp</code></li>
-  <li>Startet <code>pnpm run dev</code> automatisch</li>
-  <li>Benennt den iTerm2-Tab zu <b>MyApp</b><br>
-      <small>(<code>sleep 0.05</code> sorgt dafür, dass der Titel nach dem Befehlsstart gesetzt wird)</small></li>
+  <li>Changes into <code>~/Projects/myapp</code></li>
+  <li>Sets the iTerm2 tab title to <b>AI Chat</b> immediately</li>
+  <li>Launches <code>claude</code> — tab title is already set before it starts</li>
 </ul>
 
-<h3>💡 Felder im Formular</h3>
+<h3>💡 Form fields</h3>
 <ul>
-  <li><b>Alias Name</b> — der Befehl den du im Terminal tippst</li>
-  <li><b>Folder Path</b> — Zielordner für <code>cd</code> (optional, Drag &amp; Drop)</li>
-  <li><b>Command</b> — Zusatzbefehl nach dem cd, z.B. <code>pnpm run dev</code>,
-      <code>claude</code>, <code>gsd</code>, <code>python main.py</code> (optional)</li>
-  <li><b>iTerm2 Tab Title</b> — setzt den Tab-Namen in iTerm2 (optional)</li>
+  <li><b>Alias Name</b> — the command you type in the terminal</li>
+  <li><b>Folder Path</b> — target folder for <code>cd</code> (optional, drag &amp; drop)</li>
+  <li><b>Command</b> — runs after cd: <code>claude</code>, <code>gsd</code>,
+      <code>pnpm run dev</code>, <code>python main.py</code> (optional)</li>
+  <li><b>Tab Title</b> — sets the iTerm2 tab name, always before the command (optional)</li>
 </ul>
 
-<h3>📋 Beispiele</h3>
-<pre># Nur cd:
-alias cdproj='cd ~/Projects/myapp'
+<h3>📋 Examples</h3>
+<pre># Jump to a project:
+alias cdapi='cd ~/Projects/my-api'
 
-# cd + Befehl:
-alias dev='cd ~/Projects/myapp &amp;&amp; pnpm run dev'
+# Open Claude Code:
+alias aichat='cd ~/Projects/ai-chat &amp;&amp; printf "\033]0;AI Chat\007" &amp;&amp; claude'
 
-# cd + claude + Tab-Titel:
-alias aichat='cd ~/Projects/myapp &amp;&amp; claude &amp;&amp; sleep 0.05 &amp;&amp; echo -ne "\033]0;AI Chat\007"'
+# Start a GSD session:
+alias plan='cd ~/Projects/myapp &amp;&amp; printf "\033]0;Planning\007" &amp;&amp; gsd'
 
-# Reiner Befehl ohne cd:
+# Full dev stack:
+alias dev='cd ~/Projects/myapp &amp;&amp; printf "\033]0;Dev\007" &amp;&amp; pnpm run dev'
+
+# Standalone command (no folder):
 alias k9sprod='k9s --context production'</pre>
 
-<h3>🔒 Sicheres Editieren</h3>
-<p>TermLink berührt <b>nur</b> den markierten Block in deiner <code>~/.zshrc</code>:</p>
+<h3>▶ Run button</h3>
+<p>Opens a new iTerm2 tab and executes the alias directly from the app —
+no terminal switching needed. Only active when the alias is saved and unchanged.</p>
+
+<h3>✏️ Editable preview</h3>
+<p>The preview at the bottom can be edited manually for advanced use cases.
+Click <b>↺ Reset</b> to restore the auto-generated alias line.</p>
+
+<h3>🔒 Safe editing</h3>
+<p>TermLink only touches the marked block in your <code>~/.zshrc</code>:</p>
 <pre># BEGIN project-aliases
 # [project-alias]
-alias dev='cd ~/Projects/myapp &amp;&amp; pnpm run dev'
+alias dev='cd ~/Projects/myapp &amp;&amp; printf "\033]0;Dev\007" &amp;&amp; pnpm run dev'
 # END project-aliases</pre>
 
-<h3>💾 Automatisches Backup</h3>
-<p>Vor jeder Änderung wird <code>~/.zshrc.backup</code> angelegt.</p>
+<h3>💾 Automatic backup</h3>
+<p>Before every change, <code>~/.zshrc.backup</code> is created automatically.</p>
 
-<h3>🔄 Sofort aktiv</h3>
-<p>Nach dem Speichern läuft <code>source ~/.zshrc</code> automatisch.
-Öffne einen <b>neuen iTerm2-Tab</b> — dein Alias ist sofort verfügbar.</p>
+<h3>🔄 Instantly active</h3>
+<p>After saving, <code>source ~/.zshrc</code> runs automatically.
+Open a <b>new iTerm2 tab</b> — your alias is ready immediately.</p>
 """
 
 
@@ -599,7 +616,7 @@ class TermLinkWindow(QWidget):
         t.setStyleSheet("color:white; font-size:17px; font-weight:700;")
         hl.addWidget(t)
         hl.addStretch()
-        s = QLabel("iTerm2 Project Alias Manager")
+        s = QLabel("Terminal Project Alias Manager")
         s.setStyleSheet("color:rgba(255,255,255,.75); font-size:12px;")
         hl.addWidget(s)
         hb = QPushButton("?")
@@ -837,8 +854,8 @@ class TermLinkWindow(QWidget):
         rl.addWidget(self.cmd_field)
 
         # Tab title
-        rl.addWidget(_lbl("ITERM2 TAB TITLE  (optional)"))
-        self.title_field = _field("e.g.  MyProject")
+        rl.addWidget(_lbl("TAB TITLE  (optional — set before command)"))
+        self.title_field = _field("e.g.  MyProject  /  AI Chat  /  Dev")
         self.title_field.textChanged.connect(self._update_preview)
         rl.addWidget(self.title_field)
 
@@ -900,8 +917,7 @@ class TermLinkWindow(QWidget):
         self._refresh_list()
         self._clear_form()
         n = len(self._aliases)
-        self.status.showMessage(
-            f"Loaded {n} alias{'es' if n != 1 else ''} from ~/.zshrc")
+        self.status.showMessage(f"Loaded {n} alias{'es' if n != 1 else ''} from {SHELL_CONFIG}")
 
     def _refresh_list(self, select_name: str | None = None):
         """Listet Aliases gefiltert nach Suche und sortiert nach _sort_mode."""
@@ -981,7 +997,7 @@ class TermLinkWindow(QWidget):
         self.open_iterm_btn.setEnabled(bool(src.path))
         self._update_preview()
         self.name_field.setFocus()
-        self.status.showMessage(f"⎘  Kopie von '{src.name}' — bitte neuen Alias-Namen eingeben")
+        self.status.showMessage(f"⎘  Copy of '{src.name}' — enter a new alias name")
 
     # ── Form ──────────────────────────────────────────────────────────────
     def _clear_form(self):
