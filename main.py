@@ -642,6 +642,48 @@ class TermLinkWindow(QWidget):
         lhdr.addWidget(nb)
         ll.addLayout(lhdr)
 
+        # ── Suchfeld ──────────────────────────────────────────────────
+        self.search_field = QLineEdit()
+        self.search_field.setPlaceholderText("🔍  Suchen…")
+        self.search_field.setClearButtonEnabled(True)
+        self.search_field.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1.5px solid {BORDER}; border-radius: 7px;
+                padding: 5px 10px; font-size: 12px; background: white;
+            }}
+            QLineEdit:focus {{ border-color: {ACCENT}; }}
+        """)
+        self.search_field.textChanged.connect(self._on_search)
+        ll.addWidget(self.search_field)
+
+        # ── Sort-Buttons ───────────────────────────────────────────────
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(4)
+        self._sort_mode = "manual"   # "manual" | "az" | "za"
+        self.sort_az_btn = QPushButton("A→Z")
+        self.sort_za_btn = QPushButton("Z→A")
+        for b in (self.sort_az_btn, self.sort_za_btn):
+            b.setFixedHeight(24)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setCheckable(True)
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    background: white; color: #8E8E93;
+                    border: 1.5px solid {BORDER}; border-radius: 5px;
+                    font-size: 11px; font-weight: 600; padding: 0 8px;
+                }}
+                QPushButton:checked {{
+                    background: {ACCENT}; color: white; border-color: {ACCENT};
+                }}
+                QPushButton:hover:!checked {{ background: #F0F6FF; color: {ACCENT}; border-color: {ACCENT}; }}
+            """)
+        self.sort_az_btn.clicked.connect(lambda: self._set_sort("az"))
+        self.sort_za_btn.clicked.connect(lambda: self._set_sort("za"))
+        sort_row.addWidget(self.sort_az_btn)
+        sort_row.addWidget(self.sort_za_btn)
+        sort_row.addStretch()
+        ll.addLayout(sort_row)
+
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -655,9 +697,18 @@ class TermLinkWindow(QWidget):
         self.list_widget.currentRowChanged.connect(self._on_select)
         ll.addWidget(self.list_widget)
 
+        # ── Untere Buttons: Copy + Delete ──────────────────────────────
+        bottom_row = QHBoxLayout()
+        self.copy_alias_btn = _icon_btn("⎘", "Alias duplizieren")
+        self.copy_alias_btn.setFixedSize(34, 34)
+        self.copy_alias_btn.setEnabled(False)
+        self.copy_alias_btn.clicked.connect(self._on_duplicate)
+        bottom_row.addWidget(self.copy_alias_btn)
+        bottom_row.addStretch()
         self.del_btn = _btn("Delete", bg=DANGER, hover=DANGER_HOV, pressed=DANGER_PRS)
         self.del_btn.clicked.connect(self._on_delete)
-        ll.addWidget(self.del_btn)
+        bottom_row.addWidget(self.del_btn)
+        ll.addLayout(bottom_row)
         sp.addWidget(left)
 
         # ── RIGHT ─────────────────────────────────────────────────────
@@ -783,23 +834,92 @@ class TermLinkWindow(QWidget):
     # ── Data ──────────────────────────────────────────────────────────────
     def _load(self):
         self._aliases = read_aliases()
+        self._visible_indices = []
         self._refresh_list()
         self._clear_form()
         n = len(self._aliases)
         self.status.showMessage(
             f"Loaded {n} alias{'es' if n != 1 else ''} from ~/.zshrc")
 
-    def _refresh_list(self):
+    def _refresh_list(self, select_name: str | None = None):
+        """Listet Aliases gefiltert nach Suche und sortiert nach _sort_mode."""
+        query = self.search_field.text().strip().lower() if hasattr(self, "search_field") else ""
+
+        # Sortierung
+        items = list(enumerate(self._aliases))  # (original_idx, alias)
+        if self._sort_mode == "az":
+            items.sort(key=lambda x: x[1].name.lower())
+        elif self._sort_mode == "za":
+            items.sort(key=lambda x: x[1].name.lower(), reverse=True)
+
+        # Suche
+        if query:
+            items = [(i, a) for i, a in items
+                     if query in a.name.lower()
+                     or query in a.path.lower()
+                     or query in a.command.lower()]
+
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
-        for a in self._aliases:
+        self._visible_indices = []   # mapping: list-row → _aliases-index
+        for orig_idx, a in items:
             label = a.name
             if a.command:
                 label += f"  ›  {a.command.split()[0]}"
             item = QListWidgetItem(f"  {label}")
             item.setToolTip(a.to_zsh_line())
             self.list_widget.addItem(item)
+            self._visible_indices.append(orig_idx)
         self.list_widget.blockSignals(False)
+
+        # Nach Reload: vorher selektierten Eintrag wieder markieren
+        if select_name:
+            for row, orig_idx in enumerate(self._visible_indices):
+                if self._aliases[orig_idx].name == select_name:
+                    self.list_widget.setCurrentRow(row)
+                    return
+        self.list_widget.setCurrentRow(-1)
+
+    def _set_sort(self, mode: str):
+        if self._sort_mode == mode:
+            mode = "manual"
+        self._sort_mode = mode
+        self.sort_az_btn.setChecked(mode == "az")
+        self.sort_za_btn.setChecked(mode == "za")
+        # merke aktuell selektierten Namen
+        name = self._aliases[self._editing_index].name if self._editing_index is not None else None
+        self._refresh_list(select_name=name)
+
+    def _on_search(self, _text: str):
+        name = self._aliases[self._editing_index].name if self._editing_index is not None else None
+        self._refresh_list(select_name=name)
+
+    def _on_duplicate(self):
+        """Dupliziert den aktuellen Alias mit leerem Namen und zeigt ihn sofort im Formular."""
+        idx = self._editing_index
+        if idx is None:
+            return
+        src = self._aliases[idx]
+        # Formular mit kopierten Werten befüllen, Name leer lassen
+        self.list_widget.clearSelection()
+        self._editing_index = None
+        self.form_title.setText("Kopie von — " + src.name)
+        for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
+            w.blockSignals(True)
+        self.name_field.clear()
+        self.path_field.setText(src.path)
+        self.cmd_field.setText(src.command)
+        self.title_field.setText(src.title)
+        for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
+            w.blockSignals(False)
+        self.run_btn.setEnabled(False)
+        self.copy_alias_btn.setEnabled(False)
+        self.del_btn.setEnabled(False)
+        self.open_finder_btn.setEnabled(bool(src.path))
+        self.open_iterm_btn.setEnabled(bool(src.path))
+        self._update_preview()
+        self.name_field.setFocus()
+        self.status.showMessage(f"⎘  Kopie von '{src.name}' — bitte neuen Alias-Namen eingeben")
 
     # ── Form ──────────────────────────────────────────────────────────────
     def _clear_form(self):
@@ -812,6 +932,7 @@ class TermLinkWindow(QWidget):
         self.preview.setPlainText("")
         self.copy_btn.setEnabled(False)
         self.run_btn.setEnabled(False)
+        self.copy_alias_btn.setEnabled(False)
         self.open_finder_btn.setEnabled(False)
         self.open_iterm_btn.setEnabled(False)
         self.del_btn.setEnabled(False)
@@ -820,7 +941,6 @@ class TermLinkWindow(QWidget):
         a = self._aliases[idx]
         self._editing_index = idx
         self.form_title.setText(f"Edit — {a.name}")
-        # blockiere Signale damit _update_preview nicht feuert während befüllen
         for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
             w.blockSignals(True)
         self.name_field.setText(a.name)
@@ -830,10 +950,11 @@ class TermLinkWindow(QWidget):
         for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
             w.blockSignals(False)
         self.del_btn.setEnabled(True)
+        self.copy_alias_btn.setEnabled(True)
         has_path = bool(a.path)
         self.open_finder_btn.setEnabled(has_path)
         self.open_iterm_btn.setEnabled(has_path)
-        self._update_preview()   # einmal sauber aufrufen — setzt run_btn korrekt
+        self._update_preview()
 
     def _update_preview(self):
         name  = self.name_field.text().strip()
@@ -880,8 +1001,8 @@ class TermLinkWindow(QWidget):
         self.name_field.setFocus()
 
     def _on_select(self, row):
-        if 0 <= row < len(self._aliases):
-            self._populate_form(row)
+        if 0 <= row < len(getattr(self, "_visible_indices", [])):
+            self._populate_form(self._visible_indices[row])
 
     def _on_browse(self):
         path = QFileDialog.getExistingDirectory(
@@ -932,13 +1053,15 @@ class TermLinkWindow(QWidget):
 
         write_aliases(self._aliases)
         self._source_zshrc()
-        self._load()
-
-        for i in range(self.list_widget.count()):
-            if self._aliases[i].name == name:
-                self.list_widget.setCurrentRow(i)
+        self._aliases = read_aliases()
+        self._visible_indices = []
+        self._refresh_list(select_name=name)
+        # editing_index auf den neu geladenen Eintrag setzen
+        for i, a in enumerate(self._aliases):
+            if a.name == name:
+                self._editing_index = i
                 break
-
+        self._update_preview()
         self.status.showMessage(f"✓  Saved '{name}' and reloaded ~/.zshrc")
 
     def _on_delete(self):
@@ -953,7 +1076,9 @@ class TermLinkWindow(QWidget):
             self._aliases.pop(idx)
             write_aliases(self._aliases)
             self._source_zshrc()
-            self._load()
+            self._visible_indices = []
+            self._refresh_list()
+            self._clear_form()
             self.status.showMessage(f"🗑  Deleted '{name}' and reloaded ~/.zshrc")
 
     def _on_open_finder(self):
