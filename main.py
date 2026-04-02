@@ -820,15 +820,20 @@ class TermLinkWindow(QWidget):
         a = self._aliases[idx]
         self._editing_index = idx
         self.form_title.setText(f"Edit — {a.name}")
+        # blockiere Signale damit _update_preview nicht feuert während befüllen
+        for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
+            w.blockSignals(True)
         self.name_field.setText(a.name)
         self.path_field.setText(a.path)
         self.cmd_field.setText(a.command)
         self.title_field.setText(a.title)
+        for w in (self.name_field, self.path_field, self.cmd_field, self.title_field):
+            w.blockSignals(False)
         self.del_btn.setEnabled(True)
-        self.run_btn.setEnabled(True)
-        has_path = bool(self._aliases[idx].path)
+        has_path = bool(a.path)
         self.open_finder_btn.setEnabled(has_path)
         self.open_iterm_btn.setEnabled(has_path)
+        self._update_preview()   # einmal sauber aufrufen — setzt run_btn korrekt
 
     def _update_preview(self):
         name  = self.name_field.text().strip()
@@ -846,6 +851,19 @@ class TermLinkWindow(QWidget):
             self.copy_btn.setEnabled(False)
             self.open_finder_btn.setEnabled(False)
             self.open_iterm_btn.setEnabled(False)
+
+        # Ausführen nur erlauben wenn Eintrag gespeichert ist UND
+        # der Formularinhalt exakt dem gespeicherten Eintrag entspricht
+        can_run = False
+        if self._editing_index is not None:
+            saved = self._aliases[self._editing_index]
+            can_run = (
+                name  == saved.name    and
+                path  == saved.path    and
+                cmd   == saved.command and
+                title == saved.title
+            )
+        self.run_btn.setEnabled(can_run)
 
     def _on_copy_preview(self):
         text = self.preview.toPlainText().strip()
