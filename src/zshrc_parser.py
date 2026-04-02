@@ -37,10 +37,12 @@ class AliasEntry:
         parts = []
         if self.path:
             parts.append(f"cd {self.path}")
+        if self.title:
+            # Titel sofort nach cd setzen — VOR dem Command,
+            # damit blockierende Prozesse (claude, gsd, …) den Titel nicht verhindern
+            parts.append(f'printf "\\033]0;{self.title}\\007"')
         if self.command:
             parts.append(self.command)
-        if self.title:
-            parts.append(f'sleep 0.05 && echo -ne "\\033]0;{self.title}\\007"')
 
         body = " && ".join(parts) if parts else ""
         if not body:
@@ -59,15 +61,17 @@ class AliasEntry:
         name  = m.group(1)
         value = m.group(2)
 
-        # Remove trailing tab-title sequence (with optional sleep)
+        # Remove tab-title sequence (printf or legacy echo -ne), anywhere in the value
         title = ""
         title_m = re.search(
-            r"""\s*&&\s*(?:sleep\s+[\d.]+\s*&&\s*)?echo\s+-ne\s+["']\\033\]0;(.+?)\\007["']""",
+            r"""\s*&&\s*(?:printf\s+["']\\033\]0;(.+?)\\007["']|(?:sleep\s+[\d.]+\s*&&\s*)?echo\s+-ne\s+["']\\033\]0;(.+?)\\007["'])""",
             value,
         )
         if title_m:
-            title = title_m.group(1)
-            value = value[:title_m.start()].strip()
+            title = (title_m.group(1) or title_m.group(2) or "").strip()
+            value = (value[:title_m.start()] + value[title_m.end():]).strip()
+            # aufräumen: doppelte && entfernen
+            value = re.sub(r"\s*&&\s*&&\s*", " && ", value).strip(" &&").strip()
 
         # Detect leading cd
         path = ""

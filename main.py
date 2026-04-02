@@ -989,15 +989,15 @@ class TermLinkWindow(QWidget):
             return
         a = self._aliases[idx]
 
-        # Befehlsteile aufbauen
+        # Befehlsteile aufbauen — Titel VOR dem Command setzen
         parts = []
         if a.path:
             parts.append(f"cd {a.path}")
+        if a.title:
+            # direkt nach cd, bevor ein blockierender Prozess startet
+            parts.append(f"printf '\\033]0;{a.title}\\007'")
         if a.command:
             parts.append(a.command)
-        if a.title:
-            # Tab-Titel setzen: printf statt echo-ne (portabler, kein Escaping-Problem)
-            parts.append(f"printf '\\033]0;{a.title}\\007'")
         shell_cmd = " && ".join(parts) if parts else ""
         if not shell_cmd:
             return
